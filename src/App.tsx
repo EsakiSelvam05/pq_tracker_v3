@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { PQRecord } from './types';
-import { getRecords } from './utils/storage';
+import { getRecordsAsync } from './utils/storage';
 import Dashboard from './components/Dashboard';
 import PQEntryForm from './components/PQEntryForm';
 import RecordsView from './components/RecordsView';
@@ -27,8 +27,14 @@ function App() {
     setTimeout(() => setIsLoading(false), 800);
   }, []);
 
-  const loadRecords = () => {
-    setRecords(getRecords());
+  const loadRecords = async () => {
+    try {
+      const fetchedRecords = await getRecordsAsync();
+      setRecords(fetchedRecords);
+    } catch (error) {
+      console.error('Error loading records:', error);
+      // You might want to show an error message to the user
+    }
   };
 
   const handleSave = () => {

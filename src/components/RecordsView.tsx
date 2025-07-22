@@ -18,7 +18,8 @@ import {
   Check
 } from 'lucide-react';
 import { PQRecord, FilterOptions } from '../types';
-import { deleteRecord, saveRecord, getFileAsBlob, getFileInfo, getAllFilesInfo } from '../utils/storage';
+import { saveRecord, getFileAsBlob, getFileInfo, getAllFilesInfo } from '../utils/storage';
+import { supabase } from '../lib/supabase';
 import { isDelayed, getHoursElapsed } from '../utils/dateHelpers';
 import { formatDateForDisplay } from '../utils/dateHelpers';
 import { exportToExcel, exportToPDF } from '../utils/export';
@@ -150,22 +151,46 @@ const RecordsView: React.FC<RecordsViewProps> = ({
     return filtered;
   }, [records, filters, searchTerm, sortBy, sortOrder, activeSection, dateRange]);
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this record?')) {
-      deleteRecord(id);
-      onRecordsChange();
+      try {
+        const { error } = await supabase
+          .from('pq_records')
+          .delete()
+          .eq('id', id);
+        
+        if (error) {
+          throw error;
+        }
+        
+        // Also delete associated file data from localStorage
+        const stored = localStorage.getItem('pq_files') || '{}';
+        const filesData = JSON.parse(stored);
+        delete filesData[id];
+        localStorage.setItem('pq_files', JSON.stringify(filesData));
+        
+        onRecordsChange();
+      } catch (error) {
+        console.error('Error deleting record:', error);
+        alert('Error deleting record. Please try again.');
+      }
     }
   };
 
-  const handleMarkCompleted = (record: PQRecord) => {
+  const handleMarkCompleted = async (record: PQRecord) => {
     if (window.confirm('Mark this PQ as completed? This will set Shipping Bill to "Yes" and PQ Status to "Received".')) {
-      const updatedRecord: PQRecord = {
-        ...record,
-        shippingBillReceived: 'Yes',
-        pqStatus: 'Received'
-      };
-      saveRecord(updatedRecord);
-      onRecordsChange();
+      try {
+        const updatedRecord: PQRecord = {
+          ...record,
+          shippingBillReceived: 'Yes',
+          pqStatus: 'Received'
+        };
+        await saveRecord(updatedRecord);
+        onRecordsChange();
+      } catch (error) {
+        console.error('Error updating record:', error);
+        alert('Error updating record. Please try again.');
+      }
     }
   };
 

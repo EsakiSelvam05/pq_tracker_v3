@@ -1,7 +1,50 @@
 import { PQRecord } from '../types';
+import { supabase } from '../lib/supabase';
+import { Database } from '../lib/database.types';
 
-const STORAGE_KEY = 'pq_records';
-const FILES_STORAGE_KEY = 'pq_files';
+type DbPQRecord = Database['public']['Tables']['pq_records']['Row'];
+type DbPQRecordInsert = Database['public']['Tables']['pq_records']['Insert'];
+type DbPQRecordUpdate = Database['public']['Tables']['pq_records']['Update'];
+
+// Convert database record to application record
+const dbRecordToAppRecord = (dbRecord: DbPQRecord): PQRecord => {
+  return {
+    id: dbRecord.id,
+    date: dbRecord.date || '',
+    shipperName: dbRecord.shipper_name,
+    buyer: dbRecord.buyer,
+    invoiceNumber: dbRecord.invoice_number,
+    commodity: dbRecord.commodity,
+    shippingBillReceived: dbRecord.shipping_bill_received ? 'Yes' : 'No',
+    pqStatus: (dbRecord.pq_status as 'Pending' | 'Received') || 'Pending',
+    pqHardcopy: (dbRecord.pq_hardcopy as 'Received' | 'Not Received') || 'Not Received',
+    permitCopyStatus: (dbRecord.permit_copy_status as 'Received' | 'Not Received' | 'Not Required') || 'Not Required',
+    destinationPort: dbRecord.destination_port || '',
+    remarks: dbRecord.remarks || '',
+    uploadedFiles: dbRecord.files ? (dbRecord.files as any[]) : [],
+    createdAt: new Date(dbRecord.created_at || '').getTime()
+  };
+};
+
+// Convert application record to database record
+const appRecordToDbRecord = (appRecord: PQRecord): DbPQRecordInsert | DbPQRecordUpdate => {
+  return {
+    // Let Supabase generate the UUID if id is not a valid UUID
+    ...(appRecord.id && appRecord.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i) ? { id: appRecord.id } : {}),
+    date: appRecord.date || null,
+    shipper_name: appRecord.shipperName,
+    buyer: appRecord.buyer,
+    invoice_number: appRecord.invoiceNumber,
+    commodity: appRecord.commodity,
+    shipping_bill_received: appRecord.shippingBillReceived === 'Yes',
+    pq_status: appRecord.pqStatus,
+    pq_hardcopy: appRecord.pqHardcopy,
+    permit_copy_status: appRecord.permitCopyStatus,
+    destination_port: appRecord.destinationPort,
+    remarks: appRecord.remarks,
+    files: appRecord.uploadedFiles ? JSON.parse(JSON.stringify(appRecord.uploadedFiles)) : null
+  };
+};
 
 // Helper function to convert File to base64
 const fileToBase64 = (file: File): Promise<string> => {
@@ -24,45 +67,19 @@ const base64ToBlob = (base64: string, mimeType: string): Blob => {
   return new Blob([byteArray], { type: mimeType });
 };
 
-// Store file data separately
-const saveFileData = async (recordId: string, files: File[]): Promise<void> => {
-  try {
-    const filesData = _getAllStoredFilesData();
-    
-    // Convert all files to base64 and store as array
-    const fileDataArray = await Promise.all(
-      files.map(async (file) => ({
-        name: file.name,
-        type: file.type,
-        size: file.size,
-        data: await fileToBase64(file)
-      }))
-    );
-    
-    filesData[recordId] = fileDataArray;
-    localStorage.setItem(FILES_STORAGE_KEY, JSON.stringify(filesData));
-  } catch (error) {
-    console.error('Error saving file data:', error);
-  }
-};
-
-// Get file data
-const _getAllStoredFilesData = (): Record<string, any> => {
-  const stored = localStorage.getItem(FILES_STORAGE_KEY);
-  return stored ? JSON.parse(stored) : {};
-};
-
-// Get files data for a specific record
-const getFilesDataForRecord = (recordId: string): any[] => {
-  const filesData = _getAllStoredFilesData();
-  return filesData[recordId] || [];
-};
-
 // Get file as Blob
 export const getFileAsBlob = (recordId: string, fileIndex: number): Blob | null => {
   try {
-    const filesArray = getFilesDataForRecord(recordId);
-    const fileData = filesArray[fileIndex];
+    // For now, we'll use localStorage as fallback for file storage
+    // In a production app, you'd want to use Supabase Storage
+    const stored = localStorage.getItem('pq_files');
+    if (!stored) return null;
+    
+    const filesData = JSON.parse(stored);
+    const recordFiles = filesData[recordId];
+    if (!recordFiles || !recordFiles[fileIndex]) return null;
+    
+    const fileData = recordFiles[fileIndex];
     if (!fileData) return null;
     
     return base64ToBlob(fileData.data, fileData.type);
@@ -75,8 +92,14 @@ export const getFileAsBlob = (recordId: string, fileIndex: number): Blob | null 
 // Get file info
 export const getFileInfo = (recordId: string, fileIndex: number): { name: string; type: string; size: number } | null => {
   try {
-    const filesArray = getFilesDataForRecord(recordId);
-    const fileData = filesArray[fileIndex];
+    const stored = localStorage.getItem('pq_files');
+    if (!stored) return null;
+    
+    const filesData = JSON.parse(stored);
+    const recordFiles = filesData[recordId];
+    if (!recordFiles || !recordFiles[fileIndex]) return null;
+    
+    const fileData = recordFiles[fileIndex];
     if (!fileData) return null;
     
     return {
@@ -93,8 +116,14 @@ export const getFileInfo = (recordId: string, fileIndex: number): { name: string
 // Get all files info for a record
 export const getAllFilesInfo = (recordId: string): { name: string; type: string; size: number }[] => {
   try {
-    const filesArray = getFilesDataForRecord(recordId);
-    return filesArray.map(fileData => ({
+    const stored = localStorage.getItem('pq_files');
+    if (!stored) return [];
+    
+    const filesData = JSON.parse(stored);
+    const recordFiles = filesData[recordId];
+    if (!recordFiles) return [];
+    
+    return recordFiles.map((fileData: any) => ({
       name: fileData.name,
       type: fileData.type,
       size: fileData.size
@@ -105,50 +134,137 @@ export const getAllFilesInfo = (recordId: string): { name: string; type: string;
   }
 };
 
-// Delete file data
-const deleteFileData = (recordId: string): void => {
-  const filesData = _getAllStoredFilesData();
-  delete filesData[recordId];
-  localStorage.setItem(FILES_STORAGE_KEY, JSON.stringify(filesData));
+// Store file data (keeping localStorage for now, but files metadata will be in Supabase)
+const saveFileData = async (recordId: string, files: File[]): Promise<any[]> => {
+  try {
+    // Convert files to base64 for localStorage (temporary solution)
+    const fileDataArray = await Promise.all(
+      files.map(async (file) => ({
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        data: await fileToBase64(file)
+      }))
+    );
+    
+    // Store in localStorage for now
+    const stored = localStorage.getItem('pq_files') || '{}';
+    const filesData = JSON.parse(stored);
+    filesData[recordId] = fileDataArray;
+    localStorage.setItem('pq_files', JSON.stringify(filesData));
+    
+    // Return file references for database storage
+    return fileDataArray.map((_, index) => `stored_file_${index}`);
+  } catch (error) {
+    console.error('Error saving file data:', error);
+    return [];
+  }
 };
 
 export const saveRecord = async (record: PQRecord): Promise<void> => {
-  const records = getRecords();
-  const existingIndex = records.findIndex(r => r.id === record.id);
-  
-  // Handle file storage separately
-  if (record.uploadedFiles && record.uploadedFiles.length > 0) {
-    const filesToStore = record.uploadedFiles.filter(file => file instanceof File) as File[];
-    if (filesToStore.length > 0) {
-      await saveFileData(record.id, filesToStore);
+  try {
+    // Ensure we have a valid UUID for the record
+    if (!record.id || !record.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)) {
+      record.id = generateId();
     }
-    // Store only references to the files
-    record.uploadedFiles = record.uploadedFiles.map((file, index) => 
-      file instanceof File ? `stored_file_${index}` : file
-    );
+    
+    // Handle file storage separately
+    let fileReferences: any[] = [];
+    if (record.uploadedFiles && record.uploadedFiles.length > 0) {
+      const filesToStore = record.uploadedFiles.filter(file => file instanceof File) as File[];
+      if (filesToStore.length > 0) {
+        fileReferences = await saveFileData(record.id, filesToStore);
+      } else {
+        // Keep existing file references
+        fileReferences = record.uploadedFiles;
+      }
+    }
+    
+    // Prepare record for database
+    const recordToSave = { ...record, uploadedFiles: fileReferences };
+    const dbRecord = appRecordToDbRecord(recordToSave);
+    
+    // Check if record exists
+    const { data: existingRecord } = await supabase
+      .from('pq_records')
+      .select('id')
+      .eq('id', record.id)
+      .single();
+    
+    if (existingRecord) {
+      // Update existing record
+      const { error } = await supabase
+        .from('pq_records')
+        .update(dbRecord)
+        .eq('id', record.id);
+      
+      if (error) {
+        throw error;
+      }
+    } else {
+      // Insert new record
+      const { error } = await supabase
+        .from('pq_records')
+        .insert(dbRecord);
+      
+      if (error) {
+        throw error;
+      }
+    }
+  } catch (error) {
+    console.error('Error saving record:', error);
+    throw error;
   }
-  
-  if (existingIndex >= 0) {
-    records[existingIndex] = record;
-  } else {
-    records.push(record);
-  }
-  
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
 };
 
 export const getRecords = (): PQRecord[] => {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  return stored ? JSON.parse(stored) : [];
+  // This will be replaced with async version, but keeping sync for now
+  // In a real app, you'd want to make this async and handle loading states
+  return [];
+};
+
+export const getRecordsAsync = async (): Promise<PQRecord[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('pq_records')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      throw error;
+    }
+    
+    return data ? data.map(dbRecordToAppRecord) : [];
+  } catch (error) {
+    console.error('Error fetching records:', error);
+    return [];
+  }
 };
 
 export const deleteRecord = (id: string): void => {
-  const records = getRecords().filter(r => r.id !== id);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
-  // Also delete associated file data
-  deleteFileData(id);
+  // Make this async in the component
+  supabase
+    .from('pq_records')
+    .delete()
+    .eq('id', id)
+    .then(({ error }) => {
+      if (error) {
+        console.error('Error deleting record:', error);
+      }
+    });
+  
+  // Also delete associated file data from localStorage
+  const stored = localStorage.getItem('pq_files') || '{}';
+  const filesData = JSON.parse(stored);
+  delete filesData[id];
+  localStorage.setItem('pq_files', JSON.stringify(filesData));
 };
 
 export const generateId = (): string => {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2);
+  // Generate a proper UUID v4
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
 };
