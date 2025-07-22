@@ -29,7 +29,8 @@ const dbRecordToAppRecord = (dbRecord: DbPQRecord): PQRecord => {
 // Convert application record to database record
 const appRecordToDbRecord = (appRecord: PQRecord): DbPQRecordInsert | DbPQRecordUpdate => {
   return {
-    id: appRecord.id,
+    // Let Supabase generate the UUID if id is not a valid UUID
+    ...(appRecord.id && appRecord.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i) ? { id: appRecord.id } : {}),
     date: appRecord.date || null,
     shipper_name: appRecord.shipperName,
     buyer: appRecord.buyer,
@@ -162,6 +163,11 @@ const saveFileData = async (recordId: string, files: File[]): Promise<any[]> => 
 
 export const saveRecord = async (record: PQRecord): Promise<void> => {
   try {
+    // Ensure we have a valid UUID for the record
+    if (!record.id || !record.id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)) {
+      record.id = generateId();
+    }
+    
     // Handle file storage separately
     let fileReferences: any[] = [];
     if (record.uploadedFiles && record.uploadedFiles.length > 0) {
@@ -255,5 +261,10 @@ export const deleteRecord = (id: string): void => {
 };
 
 export const generateId = (): string => {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2);
+  // Generate a proper UUID v4
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
 };
