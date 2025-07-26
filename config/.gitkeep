@@ -1,0 +1,3 @@
+# This folder is for configuration files
+# Add your GCS service account key file here as: gcs-service-account.json
+# Make sure it's added to .gitignore for security

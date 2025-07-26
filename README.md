@@ -23,8 +23,25 @@ npm install
 1. Create a Google Cloud Project
 2. Enable the Cloud Storage API
 3. Create a service account with Storage Admin permissions
-4. Download the service account key JSON file
+4. Download the service account key JSON file and store it securely
 5. Create a GCS bucket for file storage
+
+#### Storing the Service Account Key:
+
+**Option 1: Local Development (File-based)**
+```bash
+# Place your service account key file in the config folder
+cp path/to/your-service-account-key.json ./config/gcs-service-account.json
+```
+
+**Option 2: Production (Environment Variables) - RECOMMENDED**
+```bash
+# Use environment variables instead of files
+export GOOGLE_CLOUD_PROJECT_ID="your-project-id"
+export GOOGLE_CLOUD_CLIENT_EMAIL="your-service-account@your-project.iam.gserviceaccount.com"
+export GOOGLE_CLOUD_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+export GCS_BUCKET_NAME="your-bucket-name"
+```
 
 ### 3. Environment Configuration
 
