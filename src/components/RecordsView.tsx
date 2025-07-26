@@ -15,7 +15,9 @@ import {
   List, 
   Sparkles, 
   Award,
-  Check
+  Check,
+  Eye,
+  File
 } from 'lucide-react';
 import { PQRecord, FilterOptions } from '../types';
 import { saveRecord, getFileAsBlob, getFileInfo, getAllFilesInfo } from '../utils/storage';
@@ -23,6 +25,8 @@ import { supabase } from '../lib/supabase';
 import { isDelayed, getHoursElapsed } from '../utils/dateHelpers';
 import { formatDateForDisplay } from '../utils/dateHelpers';
 import { exportToExcel, exportToPDF } from '../utils/export';
+import FileManager from './FileManager';
+import { gcsService } from '../services/gcsService';
 
 interface RecordsViewProps {
   records: PQRecord[];
@@ -46,6 +50,7 @@ const RecordsView: React.FC<RecordsViewProps> = ({
   const [activeSection, setActiveSection] = useState<'all' | 'pending' | 'received' | 'hardcopyMissing'>('all');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [viewMode, setViewMode] = useState<'details' | 'list'>('details');
+  const [expandedFileViews, setExpandedFileViews] = useState<Set<string>>(new Set());
 
   // Get unique shipper names for dropdown
   const uniqueShipperNames = useMemo(() => {
@@ -194,9 +199,38 @@ const RecordsView: React.FC<RecordsViewProps> = ({
     }
   };
 
+  const toggleFileView = (recordId: string) => {
+    setExpandedFileViews(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(recordId)) {
+        newSet.delete(recordId);
+      } else {
+        newSet.add(recordId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleGCSFileDownload = async (fileName: string, originalName?: string) => {
+    try {
+      await gcsService.downloadFile(fileName, originalName);
+    } catch (error) {
+      console.error('Error downloading file from GCS:', error);
+      alert('Error downloading file. Please try again.');
+    }
+  };
+
   const handleDownloadInvoice = (record: PQRecord) => {
     if (record.uploadedFiles && record.uploadedFiles.length > 0) {
-      handleDownloadFile(record, 0);
+      // Check if it's a GCS file (string) or legacy file (File object)
+      const firstFile = record.uploadedFiles[0];
+      if (typeof firstFile === 'string') {
+        // GCS file - use GCS service
+        handleGCSFileDownload(firstFile, `${record.invoiceNumber}_invoice`);
+      } else {
+        // Legacy file - use existing method
+        handleDownloadFile(record, 0);
+      }
     } else {
       alert('No invoice file available for download');
     }
@@ -527,7 +561,7 @@ const RecordsView: React.FC<RecordsViewProps> = ({
                 <div className="font-semibold text-gray-900 truncate" title={record.invoiceNumber}>
                   {record.invoiceNumber}
                 </div>
-                {record.uploadedInvoice && (
+                {record.uploadedFiles && record.uploadedFiles.length > 0 && (
                   <button
                     onClick={() => handleDownloadInvoice(record)}
                     className="text-xs text-blue-600 hover:text-blue-800 flex items-center space-x-1 mt-1"
@@ -701,7 +735,7 @@ const RecordsView: React.FC<RecordsViewProps> = ({
               </div>
 
               {/* Invoice File Section */}
-              {record.uploadedFiles && record.uploadedFiles.length > 0 && (
+              {record.uploadedFiles && record.uploadedFiles.length > 0 && !expandedFileViews.has(record.id) && (
                 <div className="bg-white/60 backdrop-blur-sm rounded-xl p-3 border border-white/40">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center space-x-2">
@@ -710,23 +744,67 @@ const RecordsView: React.FC<RecordsViewProps> = ({
                         Files ({record.uploadedFiles.length})
                       </span>
                     </div>
+                    <button
+                      onClick={() => toggleFileView(record.id)}
+                      className="text-xs text-blue-600 hover:text-blue-800 flex items-center space-x-1"
+                    >
+                      <Eye size={12} />
+                      <span>View All</span>
+                    </button>
                   </div>
                   <div className="space-y-1">
-                    {getAllFilesInfo(record.id).map((fileInfo, index) => (
+                    {record.uploadedFiles.slice(0, 2).map((file, index) => {
+                      // Handle both GCS files (strings) and legacy files
+                      const isGCSFile = typeof file === 'string';
+                      const fileName = isGCSFile ? file : `File ${index + 1}`;
+                      const displayName = isGCSFile ? file.split('/').pop() || fileName : (getAllFilesInfo(record.id)[index]?.name || fileName);
+                      
+                      return (
                       <div key={index} className="flex items-center justify-between py-1">
-                        <span className="text-xs text-gray-600 truncate flex-1" title={fileInfo.name}>
-                          {fileInfo.name}
+                        <span className="text-xs text-gray-600 truncate flex-1" title={displayName}>
+                          {displayName}
                         </span>
                         <button
-                          onClick={() => handleDownloadFile(record, index)}
+                          onClick={() => {
+                            if (isGCSFile) {
+                              handleGCSFileDownload(file as string, displayName);
+                            } else {
+                              handleDownloadFile(record, index);
+                            }
+                          }}
                           className="ml-2 p-1 text-blue-600 hover:bg-blue-100 rounded transition-colors duration-200"
-                          title={`Download ${fileInfo.name}`}
+                          title={`Download ${displayName}`}
                         >
                           <FileDown size={12} />
                         </button>
                       </div>
-                    ))}
+                    )})}
+                    {record.uploadedFiles.length > 2 && (
+                      <div className="text-xs text-gray-500 text-center pt-1">
+                        +{record.uploadedFiles.length - 2} more files
+                      </div>
+                    )}
                   </div>
+                </div>
+              )}
+
+              {/* Expanded File Manager */}
+              {expandedFileViews.has(record.id) && (
+                <div className="bg-white/80 backdrop-blur-sm rounded-xl p-4 border border-white/40">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="font-semibold text-gray-900">File Management</h4>
+                    <button
+                      onClick={() => toggleFileView(record.id)}
+                      className="text-sm text-gray-600 hover:text-gray-800 flex items-center space-x-1"
+                    >
+                      <X size={14} />
+                      <span>Close</span>
+                    </button>
+                  </div>
+                  <FileManager
+                    recordId={record.id}
+                    onFileDeleted={() => onRecordsChange()}
+                  />
                 </div>
               )}
 
