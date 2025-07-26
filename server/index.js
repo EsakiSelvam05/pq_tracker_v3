@@ -28,7 +28,7 @@ const storage = new Storage({
   // }
 });
 
-const bucket = storage.bucket(process.env.GCS_BUCKET_NAME);
+const bucket = storage.bucket('ajak_document_hub');
 
 // Configure multer for memory storage
 const upload = multer({
