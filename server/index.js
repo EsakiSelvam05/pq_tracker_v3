@@ -19,7 +19,7 @@ app.use(express.json());
 
 // Configure Google Cloud Storage
 const storage = new Storage({
-  projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
+  projectId: 'even-ivy-466106-d4',
   keyFilename: process.env.GOOGLE_CLOUD_KEY_FILE, // Path to service account key file
   // Alternative: Use environment variables for credentials
   // credentials: {
